@@ -114,8 +114,8 @@ class MINDDataset(Dataset):
     MIND training dataset for the two-tower recommendation model
 
     For each item:
-        1. Randomly choose one clicked candidate.
-        2. Randomly sample `num_negatives` non-clicked candidates.
+        1. Choose one clicked candidate.
+        2. Sample `num_negatives` non-clicked candidates.
         3. Place the positive candidate at index 0.
         4. Return class label 0 for CrossEntropyLoss.
 
@@ -129,11 +129,15 @@ class MINDDataset(Dataset):
         behavior_df: pd.DataFrame,
         max_history: int = 50,
         num_negatives: int = 4,
+        deterministic_positive: bool = False,
+        deterministic_negative: bool = False,
     ):
         super().__init__()
 
         self.max_history = max_history
         self.num_negatives = num_negatives
+        self.deterministic_positive = deterministic_positive
+        self.deterministic_negative = deterministic_negative
 
         self.news_data = news_data
 
@@ -158,15 +162,22 @@ class MINDDataset(Dataset):
 
         # positive sampling
         positive_pool = self.positives[index]
-        positive = np.random.choice(positive_pool)
+        if self.deterministic_positive:
+            positive = positive_pool[0]
+        else:
+            positive = np.random.choice(positive_pool)
 
         # negative sampling
         negative_pool = self.negatives[index]
-        sampled_negatives = np.random.choice(
-            negative_pool,
-            size=self.num_negatives,
-            replace=(len(negative_pool) < self.num_negatives),
-        )
+        if self.deterministic_negative:
+            negative_pool = np.asarray(negative_pool, dtype=np.int64)
+            sampled_negatives = np.resize(negative_pool, self.num_negatives)
+        else:
+            sampled_negatives = np.random.choice(
+                negative_pool,
+                size=self.num_negatives,
+                replace=(len(negative_pool) < self.num_negatives),
+            )
 
         # candidate index 0 is always positive
         candidate_indices = np.concatenate(
@@ -216,6 +227,8 @@ def build_ds(
     behaviors_path: str | Path,
     max_history: int,
     num_negatives: int,
+    deterministic_positive: bool = False,
+    deterministic_negative: bool = False,
 ) -> Tuple[MINDDataset, int]:
     """helper function to build dataset"""
     behavior_dataset = BehaviorDataset(news_id_to_idx, behaviors_path=behaviors_path)
@@ -226,4 +239,6 @@ def build_ds(
         behavior_df,
         max_history,
         num_negatives,
+        deterministic_positive,
+        deterministic_negative,
     ), len(behavior_df)
