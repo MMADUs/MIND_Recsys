@@ -50,13 +50,15 @@ class DataConfig:
     num_workers: int
     pin_memory: bool
     non_blocking: bool
-    max_train_rows: int 
+    max_train_rows: int
     max_val_rows: int | None
-    max_title_len: int 
-    max_abstract_len: int 
-    max_entities: int 
-    max_history: int 
+    max_title_len: int
+    max_abstract_len: int
+    max_entities: int
+    max_history: int
     num_negatives: int
+    deterministic_positive: bool
+    deterministic_negative: bool
 
 
 @dataclass
@@ -78,10 +80,9 @@ class NewsTowerConfig:
 @dataclass
 class UserTowerConfig:
     d_model: int
-    num_heads: int
     num_layers: int
-    d_ff: int
     dropout: float
+    bidirectional: bool
 
 
 @dataclass

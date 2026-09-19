@@ -18,15 +18,17 @@ data:
   max_entities: 10
   max_history: 50
   num_negatives: 4 # adjust more later (currently 5 candidates)
+  deterministic_positive: true # validation sampling only
+  deterministic_negative: true # validation sampling only
 
 two_tower:
-  batch_size: 32
+  batch_size: 64
   epochs: 10
   lr: 0.0001
   weight_decay: 0.01
   grad_clip: 1.0
   early_stop_patience: 3
-  normalize_embeddings: false
+  normalize_embeddings: true
 
   news_tower:
     d_model: 128
@@ -44,7 +46,6 @@ two_tower:
 
   user_tower:
     d_model: 64
-    num_heads: 4
     num_layers: 2
-    d_ff: 256
+    bidirectional: false
     dropout: 0.1
