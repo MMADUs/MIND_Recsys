@@ -15,7 +15,7 @@ from src.modules import (
 )
 from src.database import NewsDatabase
 from src.dataset import build_ds
-from src.utils import DeviceDataLoader, PROJECT_ROOT, count_parameters
+from src.utils import DeviceDataLoader, PROJECT_ROOT, count_parameters, set_random_seed
 from src.trainer import Trainer
 from config import load_config, Config
 
@@ -35,6 +35,8 @@ def main():
     config = load_config(
         Config, (PROJECT_ROOT / "config" / "yaml" / "baseline_retrieval.yaml")
     )
+
+    set_random_seed(config.random_seed)
 
     parser = argparse.ArgumentParser(description="trainer script arg parser")
 
@@ -107,6 +109,8 @@ def main():
         behaviors_path=(train_path / "behaviors.tsv"),
         max_history=max_history,
         num_negatives=num_negatives,
+        deterministic_positive=False,
+        deterministic_negative=False,
     )
     val_ds, len_val = build_ds(
         news_id_to_idx,
@@ -114,12 +118,19 @@ def main():
         behaviors_path=(val_path / "behaviors.tsv"),
         max_history=max_history,
         num_negatives=num_negatives,
+        deterministic_positive=config.data.deterministic_positive,
+        deterministic_negative=config.data.deterministic_negative,
     )
 
     logger.info(
         "total trainng behavior: %d rows | total validation behavior: %d rows",
         len_train,
         len_val,
+    )
+    logger.info(
+        "validation sampling: deterministic_positive=%s | deterministic_negative=%s",
+        config.data.deterministic_positive,
+        config.data.deterministic_negative,
     )
 
     if args.test:
@@ -175,7 +186,7 @@ def main():
     val_dl = DataLoader(
         val_ds,
         val_batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
@@ -222,6 +233,6 @@ def main():
         pass  # coming soon
 
 
-# python script.py --test --model retrieval reranker
+# python train.py --test --model retrieval reranker
 if __name__ == "__main__":
     main()
