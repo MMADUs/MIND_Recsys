@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from src.modules.text_encoder import TextEncoder
 from src.modules.entity_encoder import EntityEncoder
-from src.modules.attention import AdditiveAttention, TransformerBlock
+from src.modules.attention import AdditiveAttention
 
 
 class NewsEncoder(nn.Module):
@@ -159,21 +159,22 @@ class UserEncoder(nn.Module):
     """
     Encode a user's news consumption history into a single user representation
 
-    The encoder applies stacked transformer blocks over the sequence of historical
-    news representations
+    The encoder applies a GRU over the sequence of historical news
+    representations and returns the latest valid hidden state.
 
     Args:
+        input_dim:
+            dimension of each historical news representation
         d_model:
-            dimension of each news representation and the resulting user
-            representation
+            hidden dimension used by the GRU
         num_layers:
-            number of repeated transformer block
-        num_heads:
-            number of attention heads used by the text encoder
-        d_ff:
-            dimension of the feed-forward network followed after MHA
+            number of repeated GRU layers
+        output_dim:
+            output dimension of the final user representation
         dropout:
             dropout probability
+        bidirectional:
+            whether to use a bidirectional GRU
     """
 
     def __init__(
@@ -181,68 +182,46 @@ class UserEncoder(nn.Module):
         input_dim: int,
         d_model: int,
         num_layers: int,
-        num_heads: int,
-        d_ff: int,
         output_dim: int,
         dropout: float = 0.1,
+        bidirectional: bool = False,
     ):
         super().__init__()
 
         self.input_projection = nn.Linear(input_dim, d_model)
 
-        self.layers = nn.ModuleList(
-            [
-                TransformerBlock(d_model, num_heads, d_ff, dropout)
-                for _ in range(num_layers)
-            ]
+        self.gru = nn.GRU(
+            input_size=d_model,
+            hidden_size=d_model,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0,
+            bidirectional=bidirectional,
         )
-        self.norm = nn.RMSNorm(d_model)
+        gru_output_dim = d_model * (2 if bidirectional else 1)
 
-        self.output_projection = nn.Linear(d_model, output_dim)
-
-    @staticmethod
-    def _build_causal_mask(valid_mask: torch.Tensor) -> torch.Tensor:
-        # valid_mask: (batch, seq_len)
-        _, seq_len = valid_mask.shape
-        device = valid_mask.device
-
-        # causal: position i can attend to positions <= i
-        causal = torch.tril(
-            torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
-        )
-        # causal: (seq_len, seq_len)
-
-        causal = causal[None, None, :, :]
-        # (1, 1, seq_len, seq_len)
-
-        pad = valid_mask[:, None, None, :]
-        # (batch, 1, 1, seq_len) -- masks out padded key positions
-
-        return causal & pad
-        # (batch, 1, seq_len, seq_len)
+        self.norm = nn.LayerNorm(gru_output_dim)
+        self.dropout = nn.Dropout(dropout)
+        
+        self.output_projection = nn.Linear(gru_output_dim, output_dim)
 
     def forward(self, history: torch.Tensor, valid_mask: torch.Tensor) -> torch.Tensor:
-        x = history
-        # x: (batch, history_len, news_d_model)
+        # history: (batch, history_len, news_d_model)
         # valid_mask: (batch, history_len)
 
-        x = self.input_projection(x)
+        x = self.input_projection(history)
         # (batch, history_len, news_d_model) -> (batch, history_len, user_d_model)
 
-        attn_mask = self._build_causal_mask(valid_mask)
-        # (batch, 1, history_len, history_len)
+        x = x * valid_mask.unsqueeze(-1).to(dtype=x.dtype)
 
-        for layer in self.layers:
-            x = layer(x, attn_mask)
+        x, _ = self.gru(x)
         # (batch, history_len, user_d_model)
 
-        x = self.norm(x)
-
-        length = valid_mask.sum(dim=1)  # number of article from each user
+        length = valid_mask.sum(dim=1)  # number of articles from each user
         last_idx = (length - 1).clamp_min(0)  # clamp in case history is empty
         batch_idx = torch.arange(x.size(0), device=x.device)
 
-        out = x[batch_idx, last_idx]  # pair each user with the latest vaid HSTU state
+        out = x[batch_idx, last_idx]  # pair each user with the latest valid GRU state
 
         # zero out embedding for user without history
         empty_indices = length == 0
@@ -250,8 +229,10 @@ class UserEncoder(nn.Module):
             out = out.clone()
             out[empty_indices] = 0.0
 
+        out = self.norm(out)
+        out = self.dropout(out)
         out = self.output_projection(out)
-        # (batch, history_len, user_d_model) -> (batch, history_len, news_d_model)
+        # (batch, user_d_model) -> (batch, news_d_model)
 
         return out
 
